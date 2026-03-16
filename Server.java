@@ -10,9 +10,40 @@ public class Server {
         // recieve buffer
         byte[] buffer = new byte[65535];
 
-        // intialize datagram variable
-        DatagramPacket datagram;
+        // server runs until client sends quit
+        while (true) {
+            // create datagram shell
+            DatagramPacket datagram = new DatagramPacket(buffer, buffer.length);
 
-        // [UNDER CONSTRUCTION]
+            // recive the datagram
+            socket.receive(datagram);
+
+            // show recieved data
+            System.out.println("Client sent: " + byteToString(buffer));
+
+            // quit if client quit
+            if (byteToString(buffer).equals("quit")
+                    || byteToString(buffer).equals("q")) {
+                System.out.println("EXITING...");
+                break;
+            }
+
+            // clear buffer after each message
+            buffer = new byte[65535];
+        }
+        socket.close();
+    }
+
+    private static String byteToString(byte[] bytes) {
+        // null check
+        if (bytes == null)
+            return null;
+        StringBuilder stringBuilder = new StringBuilder();
+        // iterates through bytes, casting into characters
+        // stops when hits empty byte
+        for (int i = 0; bytes[i] != 0; i++) {
+            stringBuilder.append((char) bytes[i]);
+        }
+        return stringBuilder.toString();
     }
 }
