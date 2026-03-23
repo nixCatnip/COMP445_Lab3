@@ -30,6 +30,9 @@ public class Server {
 
             // clear buffer after each message
             buffer = new byte[65535];
+
+            // send ACK
+
         }
         socket.close();
     }
