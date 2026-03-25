@@ -18,6 +18,7 @@ public class Client {
 
         // socket to send and recieve datagrams
         DatagramSocket socket = new DatagramSocket(8081);
+        socket.setSoTimeout(40000);
 
         // server port number
         System.out.println("Enter the Server's UDP Port:");
@@ -79,7 +80,7 @@ public class Client {
                 sending = false;
             }
 
-            // client swaps mode after recieving [or timeout]
+            // client swaps mode after recieving or timeout
             while (!sending) {
                 // clear buffer
                 buffer = new byte[65535];
@@ -87,49 +88,53 @@ public class Client {
                 // create datagram shell
                 DatagramPacket datagram = new DatagramPacket(buffer, buffer.length);
 
-                // receive the datagram (blocks until recieved)
-                socket.receive(datagram);
+                try {
+                    // receive the datagram (blocks until recieved)
+                    socket.receive(datagram);
 
-                // convert bytes to received packet
-                Packet recievedPacket = Packet.stringToPacket(Packet.byteToString(buffer));
+                    // convert bytes to received packet
+                    Packet recievedPacket = Packet.stringToPacket(Packet.byteToString(buffer));
 
-                // print error message if applicable
-                if (recievedPacket.messageType.equals("ERROR")) {
-                    System.out.println("Server sent: " + recievedPacket.payload);
-                }
-
-                // check connection ID and sequence number
-                if (connectionID != recievedPacket.connectionID) {
-                    System.out.println("ERROR: Invalid connection ID. Packet discarded.");
-                } else if (sequenceNumber != recievedPacket.sequenceNumber) {
-                    System.out.println("ERROR: Invalid sequence number. Packet discarded.");
-                    System.out.println(sequenceNumber);
-                    System.out.println(recievedPacket.sequenceNumber);
-                    quiting = true;
-                } else {
-                    // write data to output file
-                    File outputFile = new File("output.txt");
-                    // writer only appends after first data packet
-                    FileWriter fileWriter = new FileWriter(outputFile, acknowledging);
-                    fileWriter.write(recievedPacket.payload);
-                    fileWriter.close();
-                    System.out.println("Client recieved a valid DATA packet.");
-
-                    // TODO: handle final packet
-                    if (recievedPacket.last == 1) {
-                        quiting = true;
-                        System.out.println("Client recieved the last packet.");
+                    // print error message if applicable
+                    if (recievedPacket.messageType.equals("ERROR")) {
+                        System.out.println("Server sent: " + recievedPacket.payload);
                     }
-                }
 
+                    // check connection ID and sequence number
+                    if (connectionID != recievedPacket.connectionID) {
+                        System.out.println("ERROR: Invalid connection ID. Packet discarded.");
+                    } else if (sequenceNumber != recievedPacket.sequenceNumber) {
+                        System.out.println("ERROR: Invalid sequence number. Packet discarded.");
+                    } else {
+                        // write data to output file
+                        File outputFile = new File("output.txt");
+                        // writer only appends after first data packet
+                        FileWriter fileWriter = new FileWriter(outputFile, acknowledging);
+                        fileWriter.write(recievedPacket.payload);
+                        fileWriter.close();
+                        System.out.println("Client recieved a valid DATA packet.");
+
+                        // handle final packet
+                        if (recievedPacket.last == 1) {
+                            quiting = true;
+                            System.out.println("Client recieved the last packet.");
+                        }
+
+                        // start acknowledging if last packet was request
+                        acknowledging = true;
+                    }
+                } catch (Exception e) {
+                    // timeout
+                    System.out.println("Client timed out, resending last packet.");
+                }
                 // swap mode
                 sending = true;
-                acknowledging = true;
             }
             // end complete loop if broken.
             if (quiting)
                 break;
         }
+        System.out.println("Connection terminated.");
         sc.close();
         socket.close();
     }

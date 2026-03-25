@@ -9,6 +9,7 @@ public class Server {
     public static void main(String[] args) throws IOException {
         // socket to send and recieve datagrams
         DatagramSocket socket = new DatagramSocket(8080);
+        socket.setSoTimeout(40000);
 
         // recieve buffer
         byte[] buffer = new byte[65535];
@@ -36,7 +37,6 @@ public class Server {
         // server runs until client sends quit
         while (true) {
             while (!sending) {
-                // TODO: handle timeout
                 // clear buffer
                 buffer = new byte[65535];
 
@@ -44,65 +44,68 @@ public class Server {
                 DatagramPacket datagram = new DatagramPacket(buffer, buffer.length);
 
                 // receive the datagram
-                socket.receive(datagram);
+                try {
+                    socket.receive(datagram);
 
-                // convert bytes to received packet
-                Packet recievedPacket = Packet.stringToPacket(Packet.byteToString(buffer));
+                    // convert bytes to received packet
+                    Packet recievedPacket = Packet.stringToPacket(Packet.byteToString(buffer));
 
-                // quit if client quit [TESTING]
-                if (recievedPacket.payload.equals("quit")
-                        || recievedPacket.payload.equals("q")) {
-                    System.out.println("EXITING...");
-                    quiting = true;
-                    break;
-                }
+                    // if message is a request, load the file to be sent
+                    if (recievedPacket.messageType.equals("REQUEST")) {
+                        File loadedFile = new File(recievedPacket.payload);
+                        // check that requested file is valid
+                        if (!loadedFile.canRead()) {
+                            fileData[0] = "";
+                        } else {
+                            System.out.println("Server recieved a valid REQUEST packet.");
+                            connectionID = recievedPacket.connectionID;
+                            sequenceNumber = recievedPacket.sequenceNumber;
+                            payloadSize = recievedPacket.payloadSize;
 
-                // if message is a request, load the file to be sent
-                if (recievedPacket.messageType.equals("REQUEST")) {
-                    File loadedFile = new File(recievedPacket.payload);
-                    // check that requested file is valid
-                    if (!loadedFile.canRead()) {
-                        fileData[0] = "";
-                    } else {
-                        System.out.println("Server recieved a valid REQUEST packet.");
-                        connectionID = recievedPacket.connectionID;
-                        sequenceNumber = recievedPacket.sequenceNumber;
-                        payloadSize = recievedPacket.payloadSize;
+                            byte[] fileBytes = Files.readAllBytes(loadedFile.toPath());
 
-                        byte[] fileBytes = Files.readAllBytes(loadedFile.toPath());
-
-                        // splits file bytes according to payload size
-                        int i = 0;
-                        int k = 0;
-                        while (i < fileBytes.length) {
-                            byte[] segmentBytes = new byte[payloadSize];
-                            int j = 0;
-                            while (j + 1 < payloadSize && i < fileBytes.length) {
-                                segmentBytes[j] = fileBytes[i];
-                                j++;
-                                i++;
+                            // splits file bytes according to payload size
+                            int i = 0;
+                            int k = 0;
+                            while (i < fileBytes.length) {
+                                byte[] segmentBytes = new byte[payloadSize];
+                                int j = 0;
+                                while (j + 1 < payloadSize && i < fileBytes.length) {
+                                    segmentBytes[j] = fileBytes[i];
+                                    j++;
+                                    i++;
+                                }
+                                fileData[k] = Packet.byteToString(segmentBytes);
+                                lastSegement = k;
+                                k++;
                             }
-                            fileData[k] = Packet.byteToString(segmentBytes);
-                            lastSegement = k;
-                            k++;
                         }
                     }
-                }
 
-                // if message is a acknowledgement, handle it
-                if (recievedPacket.messageType.equals("ACK")) {
-                    if (recievedPacket.connectionID == connectionID
-                            && recievedPacket.sequenceNumber == sequenceNumber) {
-                        // send next segment
-                        sequenceNumber = (sequenceNumber + 1) % 2;
-                        segmentToSend++;
-                        System.out.println("Server recieved a valid ACK packet.");
-                    } else if (recievedPacket.connectionID != connectionID) {
-                        // set error flag
-                        invalidID = true;
+                    // if message is a acknowledgement, handle it
+                    if (recievedPacket.messageType.equals("ACK")) {
+                        if (recievedPacket.connectionID == connectionID
+                                && recievedPacket.sequenceNumber == sequenceNumber) {
+                            // send next segment
+                            sequenceNumber = (sequenceNumber + 1) % 2;
+                            segmentToSend++;
+                            System.out.println("Server recieved a valid ACK packet.");
+                        } else if (recievedPacket.connectionID != connectionID) {
+                            // set error flag
+                            invalidID = true;
+                        } else {
+                            // else, resend last packet
+                            System.out.println("Server recieved an invalid ACK packet, resending last packet.");
+                        }
+                    }
+                } catch (Exception e) {
+                    // timeout
+                    if (segmentToSend == lastSegement) {
+                        // last packet has been sent already, terminate connection
+                        quiting = true;
                     } else {
                         // else, resend last packet
-                        System.out.println("Server recieved an invalid ACK packet, resending last packet.");
+                        System.out.println("Server timed out, resending last packet.");
                     }
                 }
 
@@ -126,8 +129,6 @@ public class Server {
                     packet.payload = fileData[segmentToSend];
                     if (segmentToSend == lastSegement) {
                         packet.last = 1;
-                        quiting = true;
-                        // TODO: handle quitting timeout
                     }
                 }
 
@@ -141,7 +142,7 @@ public class Server {
                 socket.send(datagram);
                 if (packet.last == 0)
                     System.out.println("Server sent a " + packet.messageType + " packet.");
-                else
+                else if (!quiting)
                     System.out.println("Server sent the last DATA packet.");
 
                 // swap mode
@@ -151,6 +152,7 @@ public class Server {
             if (quiting)
                 break;
         }
+        System.out.println("Connection terminated.");
         socket.close();
     }
 }
