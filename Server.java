@@ -2,6 +2,8 @@ import java.io.IOException;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
+import java.nio.file.Files;
+import java.io.File;
 
 public class Server {
     public static void main(String[] args) throws IOException {
@@ -17,28 +19,91 @@ public class Server {
         // Server flags
         boolean sending = false;
         boolean quiting = false;
+        boolean invalidID = false;
+
+        // File data
+        String[] fileData = new String[100];
+        int segmentToSend = 0;
+        int lastSegement = 0;
+
+        // validation numbers
+        int sequenceNumber = 0;
+        int connectionID = 0;
+
+        // payload size
+        int payloadSize = 0;
 
         // server runs until client sends quit
         while (true) {
             while (!sending) {
+                // TODO: handle timeout
                 // clear buffer
                 buffer = new byte[65535];
 
                 // create datagram shell
                 DatagramPacket datagram = new DatagramPacket(buffer, buffer.length);
 
-                // recive the datagram
+                // receive the datagram
                 socket.receive(datagram);
 
-                // show recieved data
-                System.out.println("Client sent: " + byteToString(buffer));
+                // convert bytes to received packet
+                Packet recievedPacket = Packet.stringToPacket(Packet.byteToString(buffer));
 
-                // quit if client quit
-                if (byteToString(buffer).equals("quit")
-                        || byteToString(buffer).equals("q")) {
+                // quit if client quit [TESTING]
+                if (recievedPacket.payload.equals("quit")
+                        || recievedPacket.payload.equals("q")) {
                     System.out.println("EXITING...");
                     quiting = true;
                     break;
+                }
+
+                // if message is a request, load the file to be sent
+                if (recievedPacket.messageType.equals("REQUEST")) {
+                    File loadedFile = new File(recievedPacket.payload);
+                    // check that requested file is valid
+                    if (!loadedFile.canRead()) {
+                        fileData[0] = "";
+                    } else {
+                        System.out.println("Server recieved a valid REQUEST packet.");
+                        connectionID = recievedPacket.connectionID;
+                        sequenceNumber = recievedPacket.sequenceNumber;
+                        payloadSize = recievedPacket.payloadSize;
+
+                        byte[] fileBytes = Files.readAllBytes(loadedFile.toPath());
+
+                        // splits file bytes according to payload size
+                        int i = 0;
+                        int k = 0;
+                        while (i < fileBytes.length) {
+                            byte[] segmentBytes = new byte[payloadSize];
+                            int j = 0;
+                            while (j + 1 < payloadSize && i < fileBytes.length) {
+                                segmentBytes[j] = fileBytes[i];
+                                j++;
+                                i++;
+                            }
+                            fileData[k] = Packet.byteToString(segmentBytes);
+                            lastSegement = k;
+                            k++;
+                        }
+                    }
+                }
+
+                // if message is a acknowledgement, handle it
+                if (recievedPacket.messageType.equals("ACK")) {
+                    if (recievedPacket.connectionID == connectionID
+                            && recievedPacket.sequenceNumber == sequenceNumber) {
+                        // send next segment
+                        sequenceNumber = (sequenceNumber + 1) % 2;
+                        segmentToSend++;
+                        System.out.println("Server recieved a valid ACK packet.");
+                    } else if (recievedPacket.connectionID != connectionID) {
+                        // set error flag
+                        invalidID = true;
+                    } else {
+                        // else, resend last packet
+                        System.out.println("Server recieved an invalid ACK packet, resending last packet.");
+                    }
                 }
 
                 // swap mode
@@ -48,16 +113,36 @@ public class Server {
                 // clear buffer
                 buffer = new byte[65535];
 
-                // send ACK
-                // create dummy imput for testing
-                String dummyInput = "Testing";
-                buffer = dummyInput.getBytes();
+                // create packet, assume packet failed until proven otherwise
+                Packet packet = new Packet(connectionID, sequenceNumber, "ERROR", payloadSize,
+                        "ERROR: File failed to load.",
+                        0);
+                if (invalidID) {
+                    packet.payload = "ERROR: Invalid connection ID.";
+                    invalidID = false;
+                } else if (!fileData[0].equals("")) {
+                    // send ERROR otherwise
+                    packet.messageType = "DATA";
+                    packet.payload = fileData[segmentToSend];
+                    if (segmentToSend == lastSegement) {
+                        packet.last = 1;
+                        quiting = true;
+                        // TODO: handle quitting timeout
+                    }
+                }
+
+                // load packet as bytes
+                buffer = Packet.packetToString(packet).getBytes();
 
                 // create datagram
                 DatagramPacket datagram = new DatagramPacket(buffer, buffer.length, ipAddress, 8081);
 
                 // send datagram
                 socket.send(datagram);
+                if (packet.last == 0)
+                    System.out.println("Server sent a " + packet.messageType + " packet.");
+                else
+                    System.out.println("Server sent the last DATA packet.");
 
                 // swap mode
                 sending = false;
@@ -67,18 +152,5 @@ public class Server {
                 break;
         }
         socket.close();
-    }
-
-    private static String byteToString(byte[] bytes) {
-        // null check
-        if (bytes == null)
-            return null;
-        StringBuilder stringBuilder = new StringBuilder();
-        // iterates through bytes, casting into characters
-        // stops when hits empty byte
-        for (int i = 0; bytes[i] != 0; i++) {
-            stringBuilder.append((char) bytes[i]);
-        }
-        return stringBuilder.toString();
     }
 }

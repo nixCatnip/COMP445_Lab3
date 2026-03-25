@@ -1,7 +1,10 @@
+import java.io.File;
+import java.io.FileWriter;
 import java.io.IOException;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
+import java.util.Random;
 import java.util.Scanner;
 
 public class Client {
@@ -9,18 +12,36 @@ public class Client {
         // takes input from command line for datagram
         Scanner sc = new Scanner(System.in);
 
+        // local ip address
+        System.out.println("Enter the Server's IP Address:");
+        InetAddress ipAddress = InetAddress.getByName(sc.nextLine());
+
         // socket to send and recieve datagrams
         DatagramSocket socket = new DatagramSocket(8081);
 
-        // local ip address
-        InetAddress ipAddress = InetAddress.getLocalHost();
+        // server port number
+        System.out.println("Enter the Server's UDP Port:");
+        Integer serverPortID = Integer.parseInt(sc.nextLine());
+
+        // file name to be recieved
+        System.out.println("Enter the File Name:");
+        String fileName = sc.nextLine();
+
+        // max payload size
+        System.out.println("Maximum UDP payload size:");
+        Integer payloadSize = Integer.parseInt(sc.nextLine());
 
         // byte buffer for datagram creation
         byte[] buffer = new byte[65535];
 
+        // current validation numbers
+        int sequenceNumber = 0;
+        int connectionID = 0;
+
         // Client flags
         boolean sending = true;
         boolean quiting = false;
+        boolean acknowledging = false;
 
         // client runs until user enters "quit"
         // client swaps mode after sending
@@ -29,21 +50,30 @@ public class Client {
                 // clear buffer
                 buffer = new byte[65535];
 
-                // collect datagram data from command line
-                String input = sc.nextLine();
-                buffer = input.getBytes();
+                // create packet
+                Packet input = new Packet(connectionID, sequenceNumber, "ACK", payloadSize, "", 0);
+                if (!acknowledging) {
+                    input.messageType = "REQUEST";
+                    input.payload = fileName;
+                    Random r = new Random();
+                    connectionID = r.nextInt(1000);
+                    input.connectionID = connectionID;
+                    sequenceNumber = 0;
+                    input.sequenceNumber = 0;
+                }
+
+                // push packet into buffer as bytes
+                buffer = Packet.packetToString(input).getBytes();
 
                 // create datagram
-                DatagramPacket datagram = new DatagramPacket(buffer, buffer.length, ipAddress, 8080);
+                DatagramPacket datagram = new DatagramPacket(buffer, buffer.length, ipAddress, serverPortID);
 
                 // send datagram
                 socket.send(datagram);
-
-                // quit on user command
-                if (input.equals("quit") || input.equals("q")) {
-                    quiting = true;
-                    break;
-                }
+                System.out.println("Client sent a " + input.messageType + " packet.");
+                // increment ACK sequence number
+                if (acknowledging)
+                    sequenceNumber = (sequenceNumber + 1) % 2;
 
                 // swap mode
                 sending = false;
@@ -60,19 +90,41 @@ public class Client {
                 // receive the datagram (blocks until recieved)
                 socket.receive(datagram);
 
-                // show recieved data
-                System.out.println("Server sent: " + byteToString(buffer));
+                // convert bytes to received packet
+                Packet recievedPacket = Packet.stringToPacket(Packet.byteToString(buffer));
 
-                // quit if client quit
-                if (byteToString(buffer).equals("quit")
-                        || byteToString(buffer).equals("q")) {
-                    System.out.println("EXITING...");
+                // print error message if applicable
+                if (recievedPacket.messageType.equals("ERROR")) {
+                    System.out.println("Server sent: " + recievedPacket.payload);
+                }
+
+                // check connection ID and sequence number
+                if (connectionID != recievedPacket.connectionID) {
+                    System.out.println("ERROR: Invalid connection ID. Packet discarded.");
+                } else if (sequenceNumber != recievedPacket.sequenceNumber) {
+                    System.out.println("ERROR: Invalid sequence number. Packet discarded.");
+                    System.out.println(sequenceNumber);
+                    System.out.println(recievedPacket.sequenceNumber);
                     quiting = true;
-                    break;
+                } else {
+                    // write data to output file
+                    File outputFile = new File("output.txt");
+                    // writer only appends after first data packet
+                    FileWriter fileWriter = new FileWriter(outputFile, acknowledging);
+                    fileWriter.write(recievedPacket.payload);
+                    fileWriter.close();
+                    System.out.println("Client recieved a valid DATA packet.");
+
+                    // TODO: handle final packet
+                    if (recievedPacket.last == 1) {
+                        quiting = true;
+                        System.out.println("Client recieved the last packet.");
+                    }
                 }
 
                 // swap mode
                 sending = true;
+                acknowledging = true;
             }
             // end complete loop if broken.
             if (quiting)
@@ -80,18 +132,5 @@ public class Client {
         }
         sc.close();
         socket.close();
-    }
-
-    private static String byteToString(byte[] bytes) {
-        // null check
-        if (bytes == null)
-            return null;
-        StringBuilder stringBuilder = new StringBuilder();
-        // iterates through bytes, casting into characters
-        // stops when hits empty byte
-        for (int i = 0; i < bytes.length; i++) {
-            stringBuilder.append((char) bytes[i]);
-        }
-        return stringBuilder.toString();
     }
 }
