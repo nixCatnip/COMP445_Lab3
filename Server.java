@@ -9,7 +9,7 @@ public class Server {
     public static void main(String[] args) throws IOException {
         // socket to send and recieve datagrams
         DatagramSocket socket = new DatagramSocket(8080);
-        socket.setSoTimeout(40000);
+        socket.setSoTimeout(5000);
 
         // recieve buffer
         byte[] buffer = new byte[65535];
@@ -34,6 +34,10 @@ public class Server {
         // payload size
         int payloadSize = 0;
 
+        // statistics
+        long startTime = 0;
+        int retransmissions = 0;
+
         // server runs until client sends quit
         while (true) {
             while (!sending) {
@@ -57,6 +61,7 @@ public class Server {
                         if (!loadedFile.canRead()) {
                             fileData[0] = "";
                         } else {
+                            startTime = System.currentTimeMillis();
                             System.out.println("Server recieved a valid REQUEST packet.");
                             connectionID = recievedPacket.connectionID;
                             sequenceNumber = recievedPacket.sequenceNumber;
@@ -96,6 +101,7 @@ public class Server {
                         } else {
                             // else, resend last packet
                             System.out.println("Server recieved an invalid ACK packet, resending last packet.");
+                            retransmissions++;
                         }
                     }
                 } catch (Exception e) {
@@ -103,6 +109,9 @@ public class Server {
                     if (segmentToSend == lastSegement) {
                         // last packet has been sent already, terminate connection
                         quiting = true;
+                        long endTime = System.currentTimeMillis();
+                        System.out.println("Total time elapsed: " + (endTime - startTime) + "ms");
+                        System.out.println("Total retransmissions: " + retransmissions);
                     } else {
                         // else, resend last packet
                         System.out.println("Server timed out, resending last packet.");
