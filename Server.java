@@ -15,7 +15,7 @@ public class Server {
         byte[] buffer = new byte[65535];
 
         // local ip address
-        InetAddress ipAddress = InetAddress.getLocalHost();
+        InetAddress ipAddress = java.net.InetAddress.getByName("10.0.0.1");
 
         // Server flags
         boolean sending = false;
