@@ -132,7 +132,7 @@ public class Server {
                 if (invalidID) {
                     packet.payload = "ERROR: Invalid connection ID.";
                     invalidID = false;
-                } else if (!fileData[0].equals("")) {
+                } else if (!"".equals(fileData[0])) {
                     // send ERROR otherwise
                     packet.messageType = "DATA";
                     packet.payload = fileData[segmentToSend];
